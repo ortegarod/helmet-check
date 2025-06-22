@@ -1,4 +1,4 @@
-package com.example;
+package com.oldschooldb;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
