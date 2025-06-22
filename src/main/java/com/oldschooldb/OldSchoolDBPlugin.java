@@ -1,4 +1,4 @@
-package com.example;
+package com.oldschooldb;
 
 import com.google.inject.Provides;
 import javax.inject.Inject;
@@ -22,13 +22,13 @@ import net.runelite.client.plugins.PluginDescriptor;
 	name = "OldSchoolDB Connector",
 	description = "Connects your RuneLite to OldSchoolDB for enhanced price tracking"
 )
-public class ExamplePlugin extends Plugin
+public class OldSchoolDBPlugin extends Plugin
 {
 	@Inject
 	private Client client;
 
 	@Inject
-	private ExampleConfig config;
+	private OldSchoolDBConfig config;
 
 	private AuthService authService;
 	private boolean isAuthenticated = false;
@@ -39,7 +39,7 @@ public class ExamplePlugin extends Plugin
 	@Override
 	protected void startUp() throws Exception
 	{
-		log.info("OldSchoolDB Connector started!");
+		System.out.println("OldSchoolDB Connector started!");
 		authService = new AuthService(config.serverUrl());
 		
 		// Test connection to server
@@ -236,9 +236,9 @@ public class ExamplePlugin extends Plugin
 	}
 
 	@Provides
-	ExampleConfig provideConfig(ConfigManager configManager)
+	OldSchoolDBConfig provideConfig(ConfigManager configManager)
 	{
-		return configManager.getConfig(ExampleConfig.class);
+		return configManager.getConfig(OldSchoolDBConfig.class);
 	}
 
 }

@@ -13,3 +13,5 @@ FRONTEND README: frontend/README.md
 we need to use Java 11 to build the Runelite plugin - you're on mac terminal so use jenv - run the build and the user can test the plugin directly through intellij - API token is already in place and confirmed syncing with backend
 
 @runelite contains the github repo for Runelite
+
+- don't be a pushover and agree to everything - state your case. 
