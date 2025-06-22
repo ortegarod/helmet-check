@@ -6,7 +6,12 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.InventoryID;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
+import net.runelite.api.events.AccountHashChanged;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
@@ -28,6 +33,8 @@ public class ExamplePlugin extends Plugin
 	private AuthService authService;
 	private boolean isAuthenticated = false;
 	private boolean showAuthMessageOnLogin = false;
+	private boolean authenticationAttempted = false;
+	private Long currentAccountHash = null;
 
 	@Override
 	protected void startUp() throws Exception
@@ -51,9 +58,15 @@ public class ExamplePlugin extends Plugin
 	{
 		log.info("OldSchoolDB Connector stopped!");
 		isAuthenticated = false;
+		authenticationAttempted = false; // Reset for next startup
 	}
 
 	private void attemptAuthentication() {
+		// Prevent duplicate authentication attempts
+		if (authenticationAttempted) {
+			return;
+		}
+		
 		String apiToken = config.apiToken();
 		
 		if (apiToken.isEmpty()) {
@@ -62,6 +75,8 @@ public class ExamplePlugin extends Plugin
 			return;
 		}
 
+		authenticationAttempted = true;
+		
 		authService.authenticateToken(apiToken).thenAccept(success -> {
 			isAuthenticated = success;
 			if (success) {
@@ -77,6 +92,7 @@ public class ExamplePlugin extends Plugin
 			} else {
 				log.warn("Failed to authenticate with OldSchoolDB. Please check your API token.");
 				log.warn("Get a new token from: {}/plugin", config.serverUrl());
+				authenticationAttempted = false; // Allow retry on failure
 				if (client.getGameState() == GameState.LOGGED_IN) {
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
 						"OldSchoolDB: Authentication failed - check your token!", null);
@@ -104,6 +120,54 @@ public class ExamplePlugin extends Plugin
 				attemptAuthentication();
 			}
 		}
+	}
+
+	@Subscribe
+	public void onAccountHashChanged(AccountHashChanged event)
+	{
+		currentAccountHash = client.getAccountHash();
+		log.info("Account hash updated: {}", currentAccountHash);
+		
+		if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
+			syncCurrentBankData();
+		}
+	}
+
+	@Subscribe
+	public void onItemContainerChanged(ItemContainerChanged event)
+	{
+		if (event.getContainerId() != InventoryID.BANK.getId()) {
+			return;
+		}
+
+		// Update current account hash when bank changes (in case it wasn't set yet)
+		if (currentAccountHash == null || currentAccountHash == -1L) {
+			currentAccountHash = client.getAccountHash();
+		}
+		
+		if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
+			syncCurrentBankData();
+		}
+	}
+
+	private void syncCurrentBankData() {
+		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null) {
+			return;
+		}
+
+		authService.sendBankData(currentAccountHash, bank.getItems())
+			.thenAccept(success -> {
+				if (success) {
+					log.debug("Bank data synced successfully for account: {}", currentAccountHash);
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
+						"OldSchoolDB: Bank synced (" + bank.getItems().length + " items)", null);
+				} else {
+					log.warn("Failed to sync bank data for account: {}", currentAccountHash);
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
+						"OldSchoolDB: Bank sync failed - check connection", null);
+				}
+			});
 	}
 
 	@Provides

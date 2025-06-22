@@ -14,7 +14,7 @@ public interface ExampleConfig extends Config
 	)
 	default String greeting()
 	{
-		return "Hello";
+		return "OldSchoolDB: Bank sync ready! Open your bank to track items.";
 	}
 
 	@ConfigItem(
