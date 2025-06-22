@@ -134,4 +134,104 @@ public class AuthService {
             return false;
         });
     }
+
+    public CompletableFuture<Boolean> sendInventoryData(Long accountHash, Item[] inventoryItems) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                List<Map<String, Object>> items = new ArrayList<>();
+                
+                for (Item item : inventoryItems) {
+                    if (item.getId() <= 0 || item.getQuantity() <= 0) {
+                        continue; // Skip empty slots
+                    }
+                    
+                    Map<String, Object> itemData = new HashMap<>();
+                    itemData.put("item_id", item.getId());
+                    itemData.put("quantity", item.getQuantity());
+                    items.add(itemData);
+                }
+
+                Map<String, Object> inventoryData = new HashMap<>();
+                inventoryData.put("account_hash", accountHash);
+                inventoryData.put("timestamp", System.currentTimeMillis());
+                inventoryData.put("items", items);
+
+                String jsonBody = gson.toJson(inventoryData);
+                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+
+                Request request = new Request.Builder()
+                    .url(serverUrl + "/api/plugin/inventory/sync")
+                    .post(body)
+                    .addHeader("Authorization", "Bearer " + apiToken)
+                    .addHeader("User-Agent", "OldSchoolDB-Plugin/1.0")
+                    .addHeader("Content-Type", "application/json")
+                    .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    if (response.isSuccessful()) {
+                        log.debug("Inventory data synced successfully for account: {}", accountHash);
+                        return true;
+                    } else {
+                        log.error("Inventory sync failed with status: {}", response.code());
+                        if (response.body() != null) {
+                            log.error("Response: {}", response.body().string());
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                log.error("Inventory sync request failed", e);
+            }
+            return false;
+        });
+    }
+
+    public CompletableFuture<Boolean> sendEquipmentData(Long accountHash, Item[] equipmentItems) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                List<Map<String, Object>> items = new ArrayList<>();
+                
+                for (Item item : equipmentItems) {
+                    if (item.getId() <= 0 || item.getQuantity() <= 0) {
+                        continue; // Skip empty equipment slots
+                    }
+                    
+                    Map<String, Object> itemData = new HashMap<>();
+                    itemData.put("item_id", item.getId());
+                    itemData.put("quantity", item.getQuantity());
+                    items.add(itemData);
+                }
+
+                Map<String, Object> equipmentData = new HashMap<>();
+                equipmentData.put("account_hash", accountHash);
+                equipmentData.put("timestamp", System.currentTimeMillis());
+                equipmentData.put("items", items);
+
+                String jsonBody = gson.toJson(equipmentData);
+                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+
+                Request request = new Request.Builder()
+                    .url(serverUrl + "/api/plugin/equipment/sync")
+                    .post(body)
+                    .addHeader("Authorization", "Bearer " + apiToken)
+                    .addHeader("User-Agent", "OldSchoolDB-Plugin/1.0")
+                    .addHeader("Content-Type", "application/json")
+                    .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    if (response.isSuccessful()) {
+                        log.debug("Equipment data synced successfully for account: {}", accountHash);
+                        return true;
+                    } else {
+                        log.error("Equipment sync failed with status: {}", response.code());
+                        if (response.body() != null) {
+                            log.error("Response: {}", response.body().string());
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                log.error("Equipment sync request failed", e);
+            }
+            return false;
+        });
+    }
 }

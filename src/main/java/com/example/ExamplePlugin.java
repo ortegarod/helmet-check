@@ -136,17 +136,34 @@ public class ExamplePlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		if (event.getContainerId() != InventoryID.BANK.getId()) {
-			return;
-		}
-
-		// Update current account hash when bank changes (in case it wasn't set yet)
-		if (currentAccountHash == null || currentAccountHash == -1L) {
-			currentAccountHash = client.getAccountHash();
-		}
-		
-		if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
-			syncCurrentBankData();
+		// Handle bank, inventory, and equipment changes
+		if (event.getContainerId() == InventoryID.BANK.getId()) {
+			// Update current account hash when bank changes (in case it wasn't set yet)
+			if (currentAccountHash == null || currentAccountHash == -1L) {
+				currentAccountHash = client.getAccountHash();
+			}
+			
+			if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
+				syncCurrentBankData();
+			}
+		} else if (event.getContainerId() == InventoryID.INVENTORY.getId()) {
+			// Update current account hash when inventory changes (in case it wasn't set yet)
+			if (currentAccountHash == null || currentAccountHash == -1L) {
+				currentAccountHash = client.getAccountHash();
+			}
+			
+			if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
+				syncCurrentInventoryData();
+			}
+		} else if (event.getContainerId() == InventoryID.EQUIPMENT.getId()) {
+			// Update current account hash when equipment changes (in case it wasn't set yet)
+			if (currentAccountHash == null || currentAccountHash == -1L) {
+				currentAccountHash = client.getAccountHash();
+			}
+			
+			if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
+				syncCurrentEquipmentData();
+			}
 		}
 	}
 
@@ -166,6 +183,54 @@ public class ExamplePlugin extends Plugin
 					log.warn("Failed to sync bank data for account: {}", currentAccountHash);
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
 						"OldSchoolDB: Bank sync failed - check connection", null);
+				}
+			});
+	}
+
+	private void syncCurrentInventoryData() {
+		ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
+		if (inventory == null) {
+			return;
+		}
+
+		authService.sendInventoryData(currentAccountHash, inventory.getItems())
+			.thenAccept(success -> {
+				if (success) {
+					log.debug("Inventory data synced successfully for account: {}", currentAccountHash);
+					// Only show message for inventory if it has items (to avoid spam)
+					if (inventory.getItems().length > 0) {
+						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
+							"OldSchoolDB: Inventory synced (" + inventory.getItems().length + " items)", null);
+					}
+				} else {
+					log.warn("Failed to sync inventory data for account: {}", currentAccountHash);
+				}
+			});
+	}
+
+	private void syncCurrentEquipmentData() {
+		ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+		if (equipment == null) {
+			return;
+		}
+
+		authService.sendEquipmentData(currentAccountHash, equipment.getItems())
+			.thenAccept(success -> {
+				if (success) {
+					log.debug("Equipment data synced successfully for account: {}", currentAccountHash);
+					// Count non-null equipped items for the message
+					int equippedCount = 0;
+					for (Item item : equipment.getItems()) {
+						if (item.getId() != -1) {
+							equippedCount++;
+						}
+					}
+					if (equippedCount > 0) {
+						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
+							"OldSchoolDB: Equipment synced (" + equippedCount + " items)", null);
+					}
+				} else {
+					log.warn("Failed to sync equipment data for account: {}", currentAccountHash);
 				}
 			});
 	}
