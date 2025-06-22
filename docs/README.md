@@ -1,0 +1,2 @@
+- runelite-api gives you access to the raw game state.
+- runelite-client builds on top of that and gives you plugin tools, lifecycle management, overlays, event listeners, etc.
