@@ -20,7 +20,7 @@ public interface OldSchoolDBConfig extends Config
 	@ConfigItem(
 		keyName = "apiToken",
 		name = "API Token", 
-		description = "Get your token from: http://localhost:3001/plugin (copy and paste here)",
+		description = "Get your token from: https://oldschooldb.com/plugin - Token will be automatically verified when you paste it here",
 		secret = true
 	)
 	default String apiToken()
@@ -29,12 +29,23 @@ public interface OldSchoolDBConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "serverUrl",
-		name = "Server URL",
-		description = "OldSchoolDB server URL"
+		keyName = "verifyToken",
+		name = "Verify Token Now",
+		description = "Check this box to verify your API token immediately"
 	)
-	default String serverUrl()
+	default boolean verifyToken()
 	{
-		return "http://localhost:3001";
+		return false;
 	}
+
+	@ConfigItem(
+		keyName = "authStatus",
+		name = "Authentication Status",
+		description = "Shows whether your API token is valid"
+	)
+	default String authStatus()
+	{
+		return "Not verified";
+	}
+
 }

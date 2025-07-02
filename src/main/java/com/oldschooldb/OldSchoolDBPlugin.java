@@ -6,14 +6,18 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.GrandExchangeOffer;
+import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.AccountHashChanged;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 
@@ -30,6 +34,9 @@ public class OldSchoolDBPlugin extends Plugin
 	@Inject
 	private OldSchoolDBConfig config;
 
+	@Inject
+	private ConfigManager configManager;
+
 	private AuthService authService;
 	private boolean isAuthenticated = false;
 	private boolean showAuthMessageOnLogin = false;
@@ -40,7 +47,7 @@ public class OldSchoolDBPlugin extends Plugin
 	protected void startUp() throws Exception
 	{
 		System.out.println("OldSchoolDB Connector started!");
-		authService = new AuthService(config.serverUrl());
+		authService = new AuthService("https://api.oldschooldb.com");
 		
 		// Test connection to server
 		authService.testConnection().thenAccept(connected -> {
@@ -48,7 +55,7 @@ public class OldSchoolDBPlugin extends Plugin
 				log.info("Successfully connected to OldSchoolDB server");
 				attemptAuthentication();
 			} else {
-				log.warn("Failed to connect to OldSchoolDB server at: {}", config.serverUrl());
+				log.warn("Failed to connect to OldSchoolDB server at: https://api.oldschooldb.com");
 			}
 		});
 	}
@@ -68,10 +75,13 @@ public class OldSchoolDBPlugin extends Plugin
 		}
 		
 		String apiToken = config.apiToken();
+		log.info("API Token length: {}", apiToken != null ? apiToken.length() : "null");
+		log.info("API Token preview: {}", apiToken != null && !apiToken.isEmpty() ? 
+			apiToken.substring(0, Math.min(10, apiToken.length())) + "..." : "empty");
 		
-		if (apiToken.isEmpty()) {
+		if (apiToken == null || apiToken.trim().isEmpty()) {
 			log.info("Please configure your OldSchoolDB API token in the plugin settings");
-			log.info("Get your token from: {}/plugin", config.serverUrl());
+			log.info("Get your token from: https://oldschooldb.com/plugin");
 			return;
 		}
 
@@ -81,24 +91,55 @@ public class OldSchoolDBPlugin extends Plugin
 			isAuthenticated = success;
 			if (success) {
 				log.info("Successfully authenticated with OldSchoolDB using API token");
+				// Update status in config panel
+				configManager.setConfiguration("oldschooldb", "authStatus", "✓ Verified - Connected");
+				
 				if (client.getGameState() == GameState.LOGGED_IN) {
-					// Show message immediately if already logged in
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-						"OldSchoolDB: Connected and authenticated!", null);
+						"OldSchoolDB: Token verified successfully! ✓", null);
 				} else {
-					// Set flag to show message when user logs in
 					showAuthMessageOnLogin = true;
 				}
 			} else {
 				log.warn("Failed to authenticate with OldSchoolDB. Please check your API token.");
-				log.warn("Get a new token from: {}/plugin", config.serverUrl());
+				log.warn("Get a new token from: https://oldschooldb.com/plugin");
+				// Update status in config panel
+				configManager.setConfiguration("oldschooldb", "authStatus", "✗ Invalid - Check token");
 				authenticationAttempted = false; // Allow retry on failure
+				
 				if (client.getGameState() == GameState.LOGGED_IN) {
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-						"OldSchoolDB: Authentication failed - check your token!", null);
+						"OldSchoolDB: Token verification failed ✗ - Check your token!", null);
 				}
 			}
 		});
+	}
+
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event)
+	{
+		if (event.getGroup().equals("oldschooldb")) {
+			if (event.getKey().equals("apiToken")) {
+				log.info("API token changed, verifying...");
+				// Update status to show verification in progress
+				configManager.setConfiguration("oldschooldb", "authStatus", "⏳ Verifying...");
+				authenticationAttempted = false; // Reset to allow new verification
+				isAuthenticated = false;
+				attemptAuthentication();
+			} else if (event.getKey().equals("verifyToken")) {
+				boolean shouldVerify = Boolean.parseBoolean(event.getNewValue());
+				if (shouldVerify) {
+					log.info("Manual token verification requested");
+					// Update status to show verification in progress
+					configManager.setConfiguration("oldschooldb", "authStatus", "⏳ Verifying...");
+					authenticationAttempted = false; // Reset to allow new verification
+					isAuthenticated = false;
+					attemptAuthentication();
+					// Reset the checkbox after verification starts
+					configManager.setConfiguration("oldschooldb", "verifyToken", "false");
+				}
+			}
+		}
 	}
 
 	@Subscribe
@@ -130,6 +171,14 @@ public class OldSchoolDBPlugin extends Plugin
 		
 		if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
 			syncCurrentBankData();
+		}
+	}
+
+	@Subscribe
+	public void onGrandExchangeOfferChanged(GrandExchangeOfferChanged event)
+	{
+		if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
+			syncGrandExchangeOffer(event.getSlot(), event.getOffer());
 		}
 	}
 
@@ -231,6 +280,30 @@ public class OldSchoolDBPlugin extends Plugin
 					}
 				} else {
 					log.warn("Failed to sync equipment data for account: {}", currentAccountHash);
+				}
+			});
+	}
+
+	private void syncGrandExchangeOffer(int slot, GrandExchangeOffer offer) {
+		// Only sync if offer has meaningful data
+		if (offer.getItemId() <= 0) {
+			return;
+		}
+
+		authService.sendGrandExchangeOffer(currentAccountHash, slot, offer)
+			.thenAccept(success -> {
+				if (success) {
+					log.debug("GE offer synced successfully for account: {}, slot: {}", currentAccountHash, slot);
+					
+					// Show message for significant trades (over 1M gp)
+					long tradeValue = (long) offer.getPrice() * offer.getTotalQuantity();
+					if (tradeValue >= 1_000_000 && client.getGameState() == GameState.LOGGED_IN) {
+						String state = offer.getState().name().toLowerCase();
+						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
+							"OldSchoolDB: GE " + state + " synced (" + (tradeValue / 1_000_000) + "M gp)", null);
+					}
+				} else {
+					log.warn("Failed to sync GE offer for account: {}, slot: {}", currentAccountHash, slot);
 				}
 			});
 	}

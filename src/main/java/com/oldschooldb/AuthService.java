@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Item;
+import net.runelite.api.GrandExchangeOffer;
+import net.runelite.api.GrandExchangeOfferState;
 import okhttp3.*;
 
 import java.io.IOException;
@@ -29,10 +31,14 @@ public class AuthService {
     public CompletableFuture<Boolean> authenticateToken(String apiToken) {
         return CompletableFuture.supplyAsync(() -> {
             try {
+                String authHeader = "Bearer " + apiToken;
+                log.info("Sending request to: {}", serverUrl + "/api/plugin/auth/test");
+                log.info("Authorization header: {}", authHeader.substring(0, Math.min(20, authHeader.length())) + "...");
+                
                 Request request = new Request.Builder()
                     .url(serverUrl + "/api/plugin/auth/test")
                     .get()
-                    .addHeader("Authorization", "Bearer " + apiToken)
+                    .addHeader("Authorization", authHeader)
                     .addHeader("User-Agent", "OldSchoolDB-Plugin/1.0")
                     .build();
 
@@ -230,6 +236,48 @@ public class AuthService {
                 }
             } catch (IOException e) {
                 log.error("Equipment sync request failed", e);
+            }
+            return false;
+        });
+    }
+
+    public CompletableFuture<Boolean> sendGrandExchangeOffer(Long accountHash, int slot, GrandExchangeOffer offer) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                Map<String, Object> offerData = new HashMap<>();
+                offerData.put("account_hash", accountHash);
+                offerData.put("timestamp", System.currentTimeMillis());
+                offerData.put("slot", slot);
+                offerData.put("item_id", offer.getItemId());
+                offerData.put("quantity", offer.getTotalQuantity());
+                offerData.put("price", offer.getPrice());
+                offerData.put("spent", offer.getSpent());
+                offerData.put("state", offer.getState().name());
+                
+                String jsonBody = gson.toJson(offerData);
+                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+
+                Request request = new Request.Builder()
+                    .url(serverUrl + "/api/plugin/ge/sync")
+                    .post(body)
+                    .addHeader("Authorization", "Bearer " + apiToken)
+                    .addHeader("User-Agent", "OldSchoolDB-Plugin/1.0")
+                    .addHeader("Content-Type", "application/json")
+                    .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    if (response.isSuccessful()) {
+                        log.debug("GE offer synced successfully for account: {}, slot: {}", accountHash, slot);
+                        return true;
+                    } else {
+                        log.error("GE offer sync failed with status: {}", response.code());
+                        if (response.body() != null) {
+                            log.error("Response: {}", response.body().string());
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                log.error("GE offer sync request failed", e);
             }
             return false;
         });
