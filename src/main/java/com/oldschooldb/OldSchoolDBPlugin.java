@@ -15,6 +15,7 @@ import net.runelite.api.events.AccountHashChanged;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.GrandExchangeOfferChanged;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
@@ -36,6 +37,9 @@ public class OldSchoolDBPlugin extends Plugin
 
 	@Inject
 	private ConfigManager configManager;
+
+	@Inject
+	private ClientThread clientThread;
 
 	private AuthService authService;
 	private boolean isAuthenticated = false;
@@ -219,20 +223,37 @@ public class OldSchoolDBPlugin extends Plugin
 	private void syncCurrentBankData() {
 		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
 		if (bank == null) {
+			log.warn("Bank container is null - cannot sync");
 			return;
 		}
 
+		log.info("Starting bank sync for account: {} with {} items", currentAccountHash, bank.getItems().length);
+		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
+			"OldSchoolDB: Starting bank sync...", null);
+
 		authService.sendBankData(currentAccountHash, bank.getItems())
-			.thenAccept(success -> {
-				if (success) {
-					log.debug("Bank data synced successfully for account: {}", currentAccountHash);
+			.thenAcceptAsync(success -> {
+				// Schedule UI update on client thread
+				clientThread.invokeLater(() -> {
+					if (success) {
+						log.info("Bank data synced successfully for account: {}", currentAccountHash);
+						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
+							"OldSchoolDB: Bank synced (" + bank.getItems().length + " items)", null);
+					} else {
+						log.warn("Failed to sync bank data for account: {}", currentAccountHash);
+						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
+							"OldSchoolDB: Bank sync failed - check connection", null);
+					}
+				});
+			})
+			.exceptionally(ex -> {
+				log.error("Exception during bank sync", ex);
+				// Schedule UI update on client thread
+				clientThread.invokeLater(() -> {
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-						"OldSchoolDB: Bank synced (" + bank.getItems().length + " items)", null);
-				} else {
-					log.warn("Failed to sync bank data for account: {}", currentAccountHash);
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-						"OldSchoolDB: Bank sync failed - check connection", null);
-				}
+						"OldSchoolDB: Bank sync error - " + ex.getMessage(), null);
+				});
+				return null;
 			});
 	}
 
