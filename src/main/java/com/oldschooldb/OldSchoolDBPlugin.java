@@ -245,18 +245,22 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
-		log.info("Starting bank sync for account: {} with {} items", currentAccountHash, bank.getItems().length);
+		// Get items once to avoid multiple bank.getItems() calls
+		Item[] bankItems = bank.getItems();
+		int itemCount = bankItems.length;
+		
+		log.info("Starting bank sync for account: {} with {} items", currentAccountHash, itemCount);
 		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
 			"OldSchoolDB: Starting bank sync...", null);
 
-		authService.sendBankData(currentAccountHash, bank.getItems())
+		authService.sendBankData(currentAccountHash, bankItems)
 			.thenAcceptAsync(success -> {
 				// Schedule UI update on client thread
 				clientThread.invokeLater(() -> {
 					if (success) {
 						log.info("Bank data synced successfully for account: {}", currentAccountHash);
 						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-							"OldSchoolDB: Bank synced (" + bank.getItems().length + " items)", null);
+							"OldSchoolDB: Bank synced (" + itemCount + " items)", null);
 					} else {
 						log.warn("Failed to sync bank data for account: {}", currentAccountHash);
 						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
