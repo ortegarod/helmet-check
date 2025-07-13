@@ -57,7 +57,8 @@ public class OldSchoolDBPlugin extends Plugin
 	protected void startUp() throws Exception
 	{
 		System.out.println("OldSchoolDB Connector started!");
-		authService = new AuthService("https://api.oldschooldb.com");
+		String serverUrl = config.useLocalhost() ? "http://localhost:3001" : "https://api.oldschooldb.com";
+		authService = new AuthService(serverUrl);
 		
 		// Test connection to server
 		authService.testConnection().thenAccept(connected -> {

@@ -48,4 +48,14 @@ public interface OldSchoolDBConfig extends Config
 		return "Not verified";
 	}
 
+	@ConfigItem(
+		keyName = "useLocalhost",
+		name = "Use Localhost (Development)",
+		description = "Connect to localhost:3001 instead of production server for testing"
+	)
+	default boolean useLocalhost()
+	{
+		return false;
+	}
+
 }
