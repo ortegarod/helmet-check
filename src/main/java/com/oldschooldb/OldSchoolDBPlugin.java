@@ -47,6 +47,12 @@ public class OldSchoolDBPlugin extends Plugin
 	private boolean authenticationAttempted = false;
 	private Long currentAccountHash = null;
 
+	// Rate limiting for syncs
+	private long lastBankSyncTime = 0;
+	private long lastInventorySyncTime = 0;
+	private long lastEquipmentSyncTime = 0;
+	private static final long SYNC_COOLDOWN_MS = 10000; // 10 seconds between syncs
+
 	@Override
 	protected void startUp() throws Exception
 	{
@@ -197,7 +203,11 @@ public class OldSchoolDBPlugin extends Plugin
 			}
 			
 			if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
-				syncCurrentBankData();
+				long currentTime = System.currentTimeMillis();
+				if (currentTime - lastBankSyncTime >= SYNC_COOLDOWN_MS) {
+					lastBankSyncTime = currentTime;
+					syncCurrentBankData();
+				}
 			}
 		} else if (event.getContainerId() == InventoryID.INVENTORY.getId()) {
 			// Update current account hash when inventory changes (in case it wasn't set yet)
@@ -206,7 +216,11 @@ public class OldSchoolDBPlugin extends Plugin
 			}
 			
 			if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
-				syncCurrentInventoryData();
+				long currentTime = System.currentTimeMillis();
+				if (currentTime - lastInventorySyncTime >= SYNC_COOLDOWN_MS) {
+					lastInventorySyncTime = currentTime;
+					syncCurrentInventoryData();
+				}
 			}
 		} else if (event.getContainerId() == InventoryID.EQUIPMENT.getId()) {
 			// Update current account hash when equipment changes (in case it wasn't set yet)
@@ -215,7 +229,11 @@ public class OldSchoolDBPlugin extends Plugin
 			}
 			
 			if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
-				syncCurrentEquipmentData();
+				long currentTime = System.currentTimeMillis();
+				if (currentTime - lastEquipmentSyncTime >= SYNC_COOLDOWN_MS) {
+					lastEquipmentSyncTime = currentTime;
+					syncCurrentEquipmentData();
+				}
 			}
 		}
 	}
