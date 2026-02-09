@@ -62,7 +62,20 @@ The plugin uses API token auth and calls:
 
 ---
 
+## Plugin Hub submission (high level)
+
+RuneLite plugin development typically flows through the **Plugin Hub**.
+
+High-level steps:
+1. Ensure this repo is **public** and your plugin metadata is correct (`runelite-plugin.properties`).
+2. Fork https://github.com/runelite/plugin-hub
+3. Create a new file under `plugins/` containing:
+   - `repository=https://github.com/ortegarod/helmet-check.git`
+   - `commit=<40-char commit hash>`
+4. Open a PR to plugin-hub and follow CI feedback until merged.
+
+More detailed guide: `docs/plugin-hub.md`
+
 ## Docs / References
 
 - RuneLite developer guide: https://github.com/runelite/runelite/wiki/Developer-Guide
-- Plugin Hub guide (submission process): `docs/plugin-hub.md`
