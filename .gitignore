@@ -8,3 +8,7 @@ nbactions.xml
 nb-configuration.xml
 nbproject/
 notes.md
+
+# OS
+.DS_Store
+**/.DS_Store
