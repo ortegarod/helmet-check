@@ -16,7 +16,7 @@ Creating new plugins
 
 Generate your own repository from the plugin template link (you must be signed into GitHub first). Alternatively, you may use the create_new_plugin.py script provided in this repository to generate a new plugin project.
 
-Name your repository something appropriate, in my case I will name it helmet-check with the description You should always wear a helmet. Make sure that your repository is set to public.
+Name your repository something appropriate. For this plugin, the repo is named `oldschooldb-runelite-plugin`. Make sure your repository is set to public.
 
 In the top right, you will see a Clone or download-button. Click on it and copy the link.
 

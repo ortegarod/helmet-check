@@ -70,7 +70,7 @@ High-level steps:
 1. Ensure this repo is **public** and your plugin metadata is correct (`runelite-plugin.properties`).
 2. Fork https://github.com/runelite/plugin-hub
 3. Create a new file under `plugins/` containing:
-   - `repository=https://github.com/ortegarod/helmet-check.git`
+   - `repository=https://github.com/ortegarod/oldschooldb-runelite-plugin.git`
    - `commit=<40-char commit hash>`
 4. Open a PR to plugin-hub and follow CI feedback until merged.
 
