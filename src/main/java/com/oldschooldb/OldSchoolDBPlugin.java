@@ -8,14 +8,27 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.Quest;
+import net.runelite.api.QuestState;
+import net.runelite.api.Skill;
 import net.runelite.api.events.AccountHashChanged;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.StatChanged;
+import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.VarbitID;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.slayer.SlayerConfig;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @PluginDescriptor(
@@ -28,7 +41,13 @@ public class OldSchoolDBPlugin extends Plugin
 	private Client client;
 
 	@Inject
+	private ClientThread clientThread;
+
+	@Inject
 	private OldSchoolDBConfig config;
+
+	@Inject
+	private ConfigManager configManager;
 
 	private AuthService authService;
 	private boolean isAuthenticated = false;
@@ -43,12 +62,14 @@ public class OldSchoolDBPlugin extends Plugin
 		authService = new AuthService(config.serverUrl());
 		
 		// Test connection to server
-		authService.testConnection().thenAccept(connected -> {
-			if (connected) {
-				log.info("Successfully connected to OldSchoolDB server");
+		authService.testConnection().thenAccept(error -> {
+			if (error == null) {
+				log.info("Connected to OldSchoolDB server");
 				attemptAuthentication();
 			} else {
-				log.warn("Failed to connect to OldSchoolDB server at: {}", config.serverUrl());
+				log.warn("Connection failed: {}", error);
+				clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"OldSchoolDB: " + error, null));
 			}
 		});
 	}
@@ -77,26 +98,22 @@ public class OldSchoolDBPlugin extends Plugin
 
 		authenticationAttempted = true;
 		
-		authService.authenticateToken(apiToken).thenAccept(success -> {
-			isAuthenticated = success;
-			if (success) {
-				log.info("Successfully authenticated with OldSchoolDB using API token");
+		authService.authenticateToken(apiToken).thenAccept(error -> {
+			isAuthenticated = (error == null);
+			if (error == null) {
+				log.info("Authenticated with OldSchoolDB");
 				if (client.getGameState() == GameState.LOGGED_IN) {
-					// Show message immediately if already logged in
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-						"OldSchoolDB: Connected and authenticated!", null);
+					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"OldSchoolDB: Connected and authenticated!", null));
+					clientThread.invoke(this::syncCurrentAccountState);
 				} else {
-					// Set flag to show message when user logs in
 					showAuthMessageOnLogin = true;
 				}
 			} else {
-				log.warn("Failed to authenticate with OldSchoolDB. Please check your API token.");
-				log.warn("Get a new token from: {}/plugin", config.serverUrl());
-				authenticationAttempted = false; // Allow retry on failure
-				if (client.getGameState() == GameState.LOGGED_IN) {
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-						"OldSchoolDB: Authentication failed - check your token!", null);
-				}
+				log.warn("Auth failed: {}", error);
+				authenticationAttempted = false;
+				clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"OldSchoolDB: Auth failed - " + error, null));
 			}
 		});
 	}
@@ -107,18 +124,61 @@ public class OldSchoolDBPlugin extends Plugin
 		if (gameStateChanged.getGameState() == GameState.LOGGED_IN)
 		{
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", config.greeting(), null);
-			
-			// Show auth success message if authentication happened before login
+
 			if (isAuthenticated && showAuthMessageOnLogin) {
-				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 					"OldSchoolDB: Connected and authenticated!", null);
-				showAuthMessageOnLogin = false; // Only show once
+				showAuthMessageOnLogin = false;
 			}
-			
-			// Try to authenticate if we haven't already
+
 			if (!isAuthenticated && authService != null) {
 				attemptAuthentication();
 			}
+
+			if (isAuthenticated && currentAccountHash != null && currentAccountHash != -1L) {
+				syncCurrentAccountState();
+			}
+		}
+	}
+
+	@Subscribe
+	public void onStatChanged(StatChanged event)
+	{
+		if (!isAuthenticated || currentAccountHash == null || currentAccountHash == -1L) {
+			return;
+		}
+		syncSkillData();
+		// Quest completions often grant XP — re-check quests on any stat change
+		syncQuestData();
+		syncSlayerTaskData();
+	}
+
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event)
+	{
+		if (!isAuthenticated || currentAccountHash == null || currentAccountHash == -1L) {
+			return;
+		}
+
+		if ("timetracking".equals(event.getGroup())) {
+			syncTimeTrackingData();
+		} else if (SlayerConfig.GROUP_NAME.equals(event.getGroup())) {
+			syncSlayerTaskData();
+		}
+	}
+
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged event)
+	{
+		if (!isAuthenticated || currentAccountHash == null || currentAccountHash == -1L) {
+			return;
+		}
+
+		int varbitId = event.getVarbitId();
+		if (varbitId == VarbitID.PRAYER_RIGOUR_UNLOCKED
+			|| varbitId == VarbitID.PRAYER_AUGURY_UNLOCKED
+			|| varbitId == VarbitID.PRAYER_PRESERVE_UNLOCKED) {
+			syncPrayerUnlockData();
 		}
 	}
 
@@ -129,7 +189,7 @@ public class OldSchoolDBPlugin extends Plugin
 		log.info("Account hash updated: {}", currentAccountHash);
 		
 		if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
-			syncCurrentBankData();
+			syncCurrentAccountState();
 		}
 	}
 
@@ -173,16 +233,16 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
-		authService.sendBankData(currentAccountHash, bank.getItems())
+		authService.sendBankData(currentAccountHash, buildItemPayload(bank.getItems()))
 			.thenAccept(success -> {
 				if (success) {
 					log.debug("Bank data synced successfully for account: {}", currentAccountHash);
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-						"OldSchoolDB: Bank synced (" + bank.getItems().length + " items)", null);
+					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"OldSchoolDB: Bank synced (" + bank.getItems().length + " items)", null));
 				} else {
 					log.warn("Failed to sync bank data for account: {}", currentAccountHash);
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-						"OldSchoolDB: Bank sync failed - check connection", null);
+					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"OldSchoolDB: Bank sync failed - check connection", null));
 				}
 			});
 	}
@@ -193,14 +253,13 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
-		authService.sendInventoryData(currentAccountHash, inventory.getItems())
+		authService.sendInventoryData(currentAccountHash, buildItemPayload(inventory.getItems()))
 			.thenAccept(success -> {
 				if (success) {
 					log.debug("Inventory data synced successfully for account: {}", currentAccountHash);
-					// Only show message for inventory if it has items (to avoid spam)
 					if (inventory.getItems().length > 0) {
-						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-							"OldSchoolDB: Inventory synced (" + inventory.getItems().length + " items)", null);
+						clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+							"OldSchoolDB: Inventory synced (" + inventory.getItems().length + " items)", null));
 					}
 				} else {
 					log.warn("Failed to sync inventory data for account: {}", currentAccountHash);
@@ -214,11 +273,10 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
-		authService.sendEquipmentData(currentAccountHash, equipment.getItems())
+		authService.sendEquipmentData(currentAccountHash, buildItemPayload(equipment.getItems()))
 			.thenAccept(success -> {
 				if (success) {
 					log.debug("Equipment data synced successfully for account: {}", currentAccountHash);
-					// Count non-null equipped items for the message
 					int equippedCount = 0;
 					for (Item item : equipment.getItems()) {
 						if (item.getId() != -1) {
@@ -226,11 +284,170 @@ public class OldSchoolDBPlugin extends Plugin
 						}
 					}
 					if (equippedCount > 0) {
-						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", 
-							"OldSchoolDB: Equipment synced (" + equippedCount + " items)", null);
+						final int count = equippedCount;
+						clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+							"OldSchoolDB: Equipment synced (" + count + " items)", null));
 					}
 				} else {
 					log.warn("Failed to sync equipment data for account: {}", currentAccountHash);
+				}
+			});
+	}
+
+	private void syncCurrentAccountState()
+	{
+		if (!isAuthenticated || currentAccountHash == null || currentAccountHash == -1L) {
+			return;
+		}
+
+		syncCurrentBankData();
+		syncCurrentInventoryData();
+		syncCurrentEquipmentData();
+		syncSkillData();
+		syncQuestData();
+		syncPrayerUnlockData();
+		syncTimeTrackingData();
+		syncSlayerTaskData();
+	}
+
+	private List<Map<String, Object>> buildItemPayload(Item[] containerItems)
+	{
+		List<Map<String, Object>> items = new java.util.ArrayList<>();
+
+		for (Item item : containerItems) {
+			if (item.getId() <= 0 || item.getQuantity() <= 0) {
+				continue;
+			}
+
+			Map<String, Object> itemData = new HashMap<>();
+			itemData.put("item_id", item.getId());
+			itemData.put("quantity", item.getQuantity());
+
+			ItemComposition itemComposition = client.getItemDefinition(item.getId());
+			if (itemComposition != null && itemComposition.getName() != null && !itemComposition.getName().trim().isEmpty()) {
+				itemData.put("item_name", itemComposition.getName());
+			}
+
+			items.add(itemData);
+		}
+
+		return items;
+	}
+
+	private void syncSkillData()
+	{
+		Skill[] skills = Skill.values();
+		int[] levels = new int[skills.length];
+		int[] xp = new int[skills.length];
+		for (int i = 0; i < skills.length; i++) {
+			levels[i] = client.getRealSkillLevel(skills[i]);
+			xp[i] = client.getSkillExperience(skills[i]);
+		}
+
+		authService.sendSkillData(currentAccountHash, skills, levels, xp)
+			.thenAccept(success -> {
+				if (!success) {
+					log.warn("Failed to sync skill data for account: {}", currentAccountHash);
+				}
+			});
+	}
+
+	private void syncQuestData()
+	{
+		// Quest.getState() calls client.runScript() — must be on client thread
+		Quest[] quests = Quest.values();
+		String[] names = new String[quests.length];
+		String[] states = new String[quests.length];
+		for (int i = 0; i < quests.length; i++) {
+			names[i] = quests[i].getName();
+			QuestState state = quests[i].getState(client);
+			states[i] = state.name();
+		}
+
+		authService.sendQuestData(currentAccountHash, names, states)
+			.thenAccept(success -> {
+				if (!success) {
+					log.warn("Failed to sync quest data for account: {}", currentAccountHash);
+				}
+			});
+	}
+
+	private Map<String, Object> buildPrayerUnlock(String name, int varbitId)
+	{
+		Map<String, Object> unlock = new HashMap<>();
+		unlock.put("name", name);
+		unlock.put("varbit_id", varbitId);
+		unlock.put("unlocked", client.getVarbitValue(varbitId) == 1);
+		return unlock;
+	}
+
+	private void syncPrayerUnlockData()
+	{
+		List<Map<String, Object>> unlocks = new java.util.ArrayList<>();
+		unlocks.add(buildPrayerUnlock("Rigour", VarbitID.PRAYER_RIGOUR_UNLOCKED));
+		unlocks.add(buildPrayerUnlock("Augury", VarbitID.PRAYER_AUGURY_UNLOCKED));
+		unlocks.add(buildPrayerUnlock("Preserve", VarbitID.PRAYER_PRESERVE_UNLOCKED));
+
+		authService.sendPrayerUnlockData(currentAccountHash, unlocks)
+			.thenAccept(success -> {
+				if (!success) {
+					log.warn("Failed to sync prayer unlock data for account: {}", currentAccountHash);
+				}
+			});
+	}
+
+	private void syncTimeTrackingData()
+	{
+		String profileKey = configManager.getRSProfileKey();
+		if (profileKey == null) {
+			return;
+		}
+
+		List<String> keys = configManager.getRSProfileConfigurationKeys("timetracking", profileKey, "");
+		if (keys.isEmpty()) {
+			return;
+		}
+
+		Map<String, String> entries = new HashMap<>();
+		for (String key : keys) {
+			String value = configManager.getRSProfileConfiguration("timetracking", key);
+			if (value != null) {
+				entries.put(key, value);
+			}
+		}
+
+		authService.sendTimeTrackingData(currentAccountHash, profileKey, entries)
+			.thenAccept(success -> {
+				if (!success) {
+					log.warn("Failed to sync time tracking data for account: {}", currentAccountHash);
+				}
+			});
+	}
+
+	private Integer parseIntegerConfig(String value)
+	{
+		if (value == null || value.trim().isEmpty()) {
+			return null;
+		}
+
+		try {
+			return Integer.parseInt(value);
+		} catch (NumberFormatException e) {
+			return null;
+		}
+	}
+
+	private void syncSlayerTaskData()
+	{
+		String taskName = configManager.getRSProfileConfiguration(SlayerConfig.GROUP_NAME, SlayerConfig.TASK_NAME_KEY);
+		String taskLocation = configManager.getRSProfileConfiguration(SlayerConfig.GROUP_NAME, SlayerConfig.TASK_LOC_KEY);
+		Integer initialAmount = parseIntegerConfig(configManager.getRSProfileConfiguration(SlayerConfig.GROUP_NAME, SlayerConfig.INIT_AMOUNT_KEY));
+		Integer remainingAmount = parseIntegerConfig(configManager.getRSProfileConfiguration(SlayerConfig.GROUP_NAME, SlayerConfig.AMOUNT_KEY));
+
+		authService.sendSlayerTaskData(currentAccountHash, taskName, taskLocation, initialAmount, remainingAmount)
+			.thenAccept(success -> {
+				if (!success) {
+					log.warn("Failed to sync Slayer task for account: {}", currentAccountHash);
 				}
 			});
 	}
