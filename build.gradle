@@ -23,7 +23,7 @@ dependencies {
 
 	// okhttp + gson are provided by runelite-client at runtime — compile against
 	// them but do NOT bundle them (Plugin Hub requires injecting RuneLite's instances).
-	compileOnly 'com.squareup.okhttp3:okhttp:4.12.0'
+	compileOnly 'com.squareup.okhttp3:okhttp:3.14.9'
 	compileOnly 'com.google.code.gson:gson:2.10.1'
 
 	testImplementation 'junit:junit:4.12'
@@ -32,7 +32,7 @@ dependencies {
 }
 
 group = 'com.oldschooldb'
-version = '1.0-SNAPSHOT'
+version = '1.0'
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
