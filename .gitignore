@@ -16,3 +16,5 @@ bin/**/.java-version
 nbactions.xml
 nb-configuration.xml
 nbproject/
+# Reference docs kept local only (internal notes + copied RuneLite docs)
+docs/
