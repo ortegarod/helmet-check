@@ -1,5 +1,14 @@
 .gradle
 build
+bin/
+*.class
+
+# macOS
+.DS_Store
+
+# Stray jenv markers outside repo root
+src/**/.java-version
+bin/**/.java-version
 .idea/
 .project
 .settings/
