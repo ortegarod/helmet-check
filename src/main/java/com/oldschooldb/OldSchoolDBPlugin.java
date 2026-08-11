@@ -343,7 +343,7 @@ public class OldSchoolDBPlugin extends Plugin
 			containerId == InventoryID.EQUIPMENT.getId() ? "EQUIPMENT" : "other(" + containerId + ")";
 		boolean willSync = (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated)
 			|| ((currentAccountHash == null || currentAccountHash == -1L) && client.getAccountHash() != -1L && isAuthenticated);
-		log.info("ItemContainerChanged: {} | authed={} accountHash={} -> {}",
+		log.debug("ItemContainerChanged: {} | authed={} accountHash={} -> {}",
 			containerName, isAuthenticated, currentAccountHash, willSync ? "SYNCING" : "SKIPPED (guard failed)");
 
 		// Handle bank, inventory, and equipment changes
@@ -397,12 +397,12 @@ public class OldSchoolDBPlugin extends Plugin
 	private void syncCurrentInventoryData() {
 		ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
 		if (inventory == null) {
-			log.info("syncCurrentInventoryData: INVENTORY container is null — bailing, nothing sent");
+			log.debug("syncCurrentInventoryData: INVENTORY container is null — bailing, nothing sent");
 			return;
 		}
 
 		int itemCount = inventory.getItems().length;
-		log.info("syncCurrentInventoryData: sending {} items for account={} player={}", itemCount, currentAccountHash, getPlayerName());
+		log.debug("syncCurrentInventoryData: sending {} items for account={} player={}", itemCount, currentAccountHash, getPlayerName());
 		authService.sendInventoryData(currentAccountHash, getPlayerName(), buildItemPayload(inventory.getItems()))
 			.whenComplete((success, throwable) -> {
 				if (throwable != null) {

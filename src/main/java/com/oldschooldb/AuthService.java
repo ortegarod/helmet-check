@@ -133,7 +133,7 @@ public class AuthService {
                 RequestBody body = RequestBody.create(MediaType.get("application/json"), jsonBody);
 
                 String url = serverUrl + "/api/plugin/inventory/sync";
-                log.info("POST inventory -> {} (items={})", url, inventoryItems.size());
+                log.debug("POST inventory -> {} (items={})", url, inventoryItems.size());
 
                 Request request = new Request.Builder()
                     .url(url)
@@ -145,7 +145,7 @@ public class AuthService {
 
                 try (Response response = client.newCall(request).execute()) {
                     if (response.isSuccessful()) {
-                        log.info("Inventory sync OK: {} <- {}", response.code(), url);
+                        log.debug("Inventory sync OK: {} <- {}", response.code(), url);
                         return true;
                     } else {
                         String respBody = response.body() != null ? response.body().string() : "(no body)";
