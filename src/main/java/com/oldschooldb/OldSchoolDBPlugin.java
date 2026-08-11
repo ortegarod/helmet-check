@@ -388,12 +388,8 @@ public class OldSchoolDBPlugin extends Plugin
 			.thenAccept(success -> {
 				if (success) {
 					log.debug("Bank data synced ({} items) for account: {}", itemCount, currentAccountHash);
-					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"OldSchoolDB: Bank synced (" + itemCount + " items)", null));
 				} else {
 					log.warn("Failed to sync bank data for account: {}", currentAccountHash);
-					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"OldSchoolDB: Bank sync failed - check connection", null));
 				}
 			});
 	}
@@ -412,9 +408,7 @@ public class OldSchoolDBPlugin extends Plugin
 				if (throwable != null) {
 					log.error("Inventory sync threw (swallowed before): {}", throwable.toString(), throwable);
 				} else if (Boolean.TRUE.equals(success)) {
-					log.info("Inventory data synced ({} items) for account: {}", itemCount, currentAccountHash);
-					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"OldSchoolDB: Inventory synced (" + itemCount + " items)", null));
+					log.debug("Inventory data synced ({} items) for account: {}", itemCount, currentAccountHash);
 				} else {
 					log.warn("Failed to sync inventory data for account: {} (send returned false)", currentAccountHash);
 				}
@@ -438,8 +432,6 @@ public class OldSchoolDBPlugin extends Plugin
 			.thenAccept(success -> {
 				if (success) {
 					log.debug("Equipment data synced ({} items) for account: {}", count, currentAccountHash);
-					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"OldSchoolDB: Equipment synced (" + count + " items)", null));
 				} else {
 					log.warn("Failed to sync equipment data for account: {}", currentAccountHash);
 				}
