@@ -1,8 +1,10 @@
 package com.oldschooldb;
 
+import com.google.gson.Gson;
 import com.google.inject.Provides;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.OkHttpClient;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -51,10 +53,21 @@ public class OldSchoolDBPlugin extends Plugin
 	@Inject
 	private ConfigManager configManager;
 
+	@Inject
+	private OkHttpClient okHttpClient;
+
+	@Inject
+	private Gson gson;
+
 	private AuthService authService;
 	private boolean isAuthenticated = false;
 	private boolean showAuthMessageOnLogin = false;
 	private boolean authenticationAttempted = false;
+	// Set on the LOGGED_IN edge; the login greeting/auth chat is posted on the first
+	// game tick after getLocalPlayer() is ready (see onGameTick) rather than here.
+	// Posting chat on the LOGGED_IN edge itself runs before the client is fully loaded,
+	// which makes other plugins' onChatMessage handlers (e.g. LootTracker) NPE.
+	private boolean pendingGreeting = false;
 	private Long currentAccountHash = null;
 	// Cached display name of the current character. getLocalPlayer() is null for the
 	// first frames after login (RuneLite gotcha), so the login-edge container syncs
@@ -65,7 +78,7 @@ public class OldSchoolDBPlugin extends Plugin
 	protected void startUp() throws Exception
 	{
 		System.out.println("OldSchoolDB Connector started!");
-		authService = new AuthService(config.serverUrl());
+		authService = new AuthService(config.serverUrl(), okHttpClient, gson);
 		
 		// Test connection to server
 		authService.testConnection().thenAccept(error -> {
@@ -129,13 +142,8 @@ public class OldSchoolDBPlugin extends Plugin
 	{
 		if (gameStateChanged.getGameState() == GameState.LOGGED_IN)
 		{
-			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", config.greeting(), null);
-
-			if (isAuthenticated && showAuthMessageOnLogin) {
-				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-					"OldSchoolDB: Connected and authenticated!", null);
-				showAuthMessageOnLogin = false;
-			}
+			// Defer the greeting/auth chat to onGameTick, once the player is loaded.
+			pendingGreeting = true;
 
 			if (!isAuthenticated && authService != null) {
 				attemptAuthentication();
@@ -191,6 +199,19 @@ public class OldSchoolDBPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		// Flush the deferred login greeting/auth chat once the player is actually loaded.
+		// Doing this here (not on the LOGGED_IN edge) avoids NPEs in other plugins'
+		// onChatMessage handlers that read getLocalPlayer() before it's ready.
+		if (pendingGreeting && client.getLocalPlayer() != null) {
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", config.greeting(), null);
+			if (isAuthenticated && showAuthMessageOnLogin) {
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"OldSchoolDB: Connected and authenticated!", null);
+				showAuthMessageOnLogin = false;
+			}
+			pendingGreeting = false;
+		}
+
 		if (!isAuthenticated || currentAccountHash == null || currentAccountHash == -1L) {
 			return;
 		}

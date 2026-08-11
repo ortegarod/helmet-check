@@ -20,9 +20,9 @@ public class AuthService {
     private final String serverUrl;
     private String apiToken;
 
-    public AuthService(String serverUrl) {
-        this.client = new OkHttpClient();
-        this.gson = new Gson();
+    public AuthService(String serverUrl, OkHttpClient client, Gson gson) {
+        this.client = client;
+        this.gson = gson;
         this.serverUrl = serverUrl;
     }
 
