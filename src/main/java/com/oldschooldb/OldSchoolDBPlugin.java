@@ -37,7 +37,7 @@ import java.util.Map;
 @Slf4j
 @PluginDescriptor(
 	name = "OldSchoolDB Connector",
-	description = "Connects your RuneLite to OldSchoolDB for enhanced price tracking"
+	description = "Sync your account to your OldSchoolDB profile at oldschooldb.com"
 )
 public class OldSchoolDBPlugin extends Plugin
 {
@@ -69,17 +69,36 @@ public class OldSchoolDBPlugin extends Plugin
 	// which makes other plugins' onChatMessage handlers (e.g. LootTracker) NPE.
 	private boolean pendingGreeting = false;
 	private Long currentAccountHash = null;
+	// Debounce state for skills/quests. StatChanged fires on every XP drop, so we
+	// coalesce those bursts into throttled syncs instead of one send (and, for
+	// quests, one full re-scan) per tick — the previous behaviour caused client lag.
+	private boolean skillsDirty = false;
+	private boolean questsDirty = false;
+	private int lastSkillSyncTick = 0;
+	private int lastQuestSyncTick = 0;
+	private static final int SKILL_SYNC_INTERVAL_TICKS = 5;   // ~3s
+	private static final int QUEST_SYNC_INTERVAL_TICKS = 50;  // ~30s
 	// Cached display name of the current character. getLocalPlayer() is null for the
 	// first frames after login (RuneLite gotcha), so the login-edge container syncs
 	// can't read the name. We cache it the moment it becomes available and reuse it.
 	private String cachedPlayerName = null;
 
+	private static final String PROD_SERVER_URL = "https://api.oldschooldb.com";
+	private static final String DEV_SERVER_URL = "http://localhost:3001";
+
+	// Developers run RuneLite with -Doldschooldb.dev=true to point at the local
+	// backend. Regular users never see this and always hit prod.
+	private static String resolveServerUrl()
+	{
+		return Boolean.getBoolean("oldschooldb.dev") ? DEV_SERVER_URL : PROD_SERVER_URL;
+	}
+
 	@Override
 	protected void startUp() throws Exception
 	{
-		System.out.println("OldSchoolDB Connector started!");
-		authService = new AuthService(config.serverUrl(), okHttpClient, gson);
-		
+		log.info("OldSchoolDB Connector started!");
+		authService = new AuthService(resolveServerUrl(), okHttpClient, gson);
+
 		// Test connection to server
 		authService.testConnection().thenAccept(error -> {
 			if (error == null) {
@@ -110,8 +129,8 @@ public class OldSchoolDBPlugin extends Plugin
 		String apiToken = config.apiToken();
 		
 		if (apiToken.isEmpty()) {
-			log.info("Please configure your OldSchoolDB API token in the plugin settings");
-			log.info("Get your token from: {}/plugin", config.serverUrl());
+			log.info("Please configure your OldSchoolDB plugin key in the plugin settings");
+			log.info("Get your plugin key from: oldschooldb.com/plugin/setup");
 			return;
 		}
 
@@ -161,10 +180,11 @@ public class OldSchoolDBPlugin extends Plugin
 		if (!isAuthenticated || currentAccountHash == null || currentAccountHash == -1L) {
 			return;
 		}
-		syncSkillData();
-		// Quest completions often grant XP — re-check quests on any stat change
-		syncQuestData();
-		syncSlayerTaskData();
+		// Mark dirty and let onGameTick flush on a throttle. Quest completions grant
+		// XP, so a dirty skills change also flags a (much less frequent) quest re-scan.
+		// Slayer is handled by onConfigChanged, so it is intentionally not touched here.
+		skillsDirty = true;
+		questsDirty = true;
 	}
 
 	@Subscribe
@@ -203,7 +223,8 @@ public class OldSchoolDBPlugin extends Plugin
 		// Doing this here (not on the LOGGED_IN edge) avoids NPEs in other plugins'
 		// onChatMessage handlers that read getLocalPlayer() before it's ready.
 		if (pendingGreeting && client.getLocalPlayer() != null) {
-			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", config.greeting(), null);
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"OldSchoolDB: Sync ready! Open your bank to track items.", null);
 			if (isAuthenticated && showAuthMessageOnLogin) {
 				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 					"OldSchoolDB: Connected and authenticated!", null);
@@ -215,6 +236,21 @@ public class OldSchoolDBPlugin extends Plugin
 		if (!isAuthenticated || currentAccountHash == null || currentAccountHash == -1L) {
 			return;
 		}
+
+		// Flush debounced skill/quest syncs on a throttle so bursts of XP don't
+		// trigger a send (and quest re-scan) every tick.
+		int tick = client.getTickCount();
+		if (skillsDirty && tick - lastSkillSyncTick >= SKILL_SYNC_INTERVAL_TICKS) {
+			skillsDirty = false;
+			lastSkillSyncTick = tick;
+			syncSkillData();
+		}
+		if (questsDirty && tick - lastQuestSyncTick >= QUEST_SYNC_INTERVAL_TICKS) {
+			questsDirty = false;
+			lastQuestSyncTick = tick;
+			syncQuestData();
+		}
+
 		// The login-edge syncs fire before getLocalPlayer() is ready, so player_name
 		// arrives null. Once the name first becomes available, cache it and push one
 		// re-sync so the backend records the character's name.
@@ -283,16 +319,13 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
+		int itemCount = bank.getItems().length;
 		authService.sendBankData(currentAccountHash, getPlayerName(), buildItemPayload(bank.getItems()))
 			.thenAccept(success -> {
 				if (success) {
-					log.debug("Bank data synced successfully for account: {}", currentAccountHash);
-					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"OldSchoolDB: Bank synced (" + bank.getItems().length + " items)", null));
+					log.debug("Bank data synced ({} items) for account: {}", itemCount, currentAccountHash);
 				} else {
 					log.warn("Failed to sync bank data for account: {}", currentAccountHash);
-					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"OldSchoolDB: Bank sync failed - check connection", null));
 				}
 			});
 	}
@@ -303,14 +336,11 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
+		int itemCount = inventory.getItems().length;
 		authService.sendInventoryData(currentAccountHash, getPlayerName(), buildItemPayload(inventory.getItems()))
 			.thenAccept(success -> {
 				if (success) {
-					log.debug("Inventory data synced successfully for account: {}", currentAccountHash);
-					if (inventory.getItems().length > 0) {
-						clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-							"OldSchoolDB: Inventory synced (" + inventory.getItems().length + " items)", null));
-					}
+					log.debug("Inventory data synced ({} items) for account: {}", itemCount, currentAccountHash);
 				} else {
 					log.warn("Failed to sync inventory data for account: {}", currentAccountHash);
 				}
@@ -326,18 +356,7 @@ public class OldSchoolDBPlugin extends Plugin
 		authService.sendEquipmentData(currentAccountHash, getPlayerName(), buildItemPayload(equipment.getItems()))
 			.thenAccept(success -> {
 				if (success) {
-					log.debug("Equipment data synced successfully for account: {}", currentAccountHash);
-					int equippedCount = 0;
-					for (Item item : equipment.getItems()) {
-						if (item.getId() != -1) {
-							equippedCount++;
-						}
-					}
-					if (equippedCount > 0) {
-						final int count = equippedCount;
-						clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-							"OldSchoolDB: Equipment synced (" + count + " items)", null));
-					}
+					log.debug("Equipment data synced for account: {}", currentAccountHash);
 				} else {
 					log.warn("Failed to sync equipment data for account: {}", currentAccountHash);
 				}

@@ -41,11 +41,7 @@ public class AuthService {
                         String responseBody = response.body().string();
                         JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
                         if (jsonResponse.has("user")) {
-                            JsonObject user = jsonResponse.getAsJsonObject("user");
-                            JsonObject token = jsonResponse.getAsJsonObject("token");
-                            log.info("Authenticated - User: {}, Token: {}",
-                                user.get("email").getAsString(),
-                                token.get("name").getAsString());
+                            log.info("Authenticated successfully");
                             this.apiToken = apiToken;
                             return null; // null = success
                         }
