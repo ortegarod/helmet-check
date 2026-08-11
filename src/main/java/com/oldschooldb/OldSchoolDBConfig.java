@@ -19,8 +19,8 @@ public interface OldSchoolDBConfig extends Config
 
 	@ConfigItem(
 		keyName = "apiToken",
-		name = "API Token", 
-		description = "Get your token from: http://localhost:3001/plugin (copy and paste here)",
+		name = "Plugin Key",
+		description = "Get your plugin key from https://oldschooldb.com/plugin/setup (copy and paste here)",
 		secret = true
 	)
 	default String apiToken()

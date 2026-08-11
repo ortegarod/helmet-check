@@ -10,11 +10,13 @@ import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.Player;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
 import net.runelite.api.events.AccountHashChanged;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.VarbitChanged;
@@ -54,6 +56,10 @@ public class OldSchoolDBPlugin extends Plugin
 	private boolean showAuthMessageOnLogin = false;
 	private boolean authenticationAttempted = false;
 	private Long currentAccountHash = null;
+	// Cached display name of the current character. getLocalPlayer() is null for the
+	// first frames after login (RuneLite gotcha), so the login-edge container syncs
+	// can't read the name. We cache it the moment it becomes available and reuse it.
+	private String cachedPlayerName = null;
 
 	@Override
 	protected void startUp() throws Exception
@@ -183,9 +189,32 @@ public class OldSchoolDBPlugin extends Plugin
 	}
 
 	@Subscribe
+	public void onGameTick(GameTick event)
+	{
+		if (!isAuthenticated || currentAccountHash == null || currentAccountHash == -1L) {
+			return;
+		}
+		// The login-edge syncs fire before getLocalPlayer() is ready, so player_name
+		// arrives null. Once the name first becomes available, cache it and push one
+		// re-sync so the backend records the character's name.
+		if (cachedPlayerName == null) {
+			Player local = client.getLocalPlayer();
+			String name = local != null ? local.getName() : null;
+			if (name != null && !name.isEmpty()) {
+				cachedPlayerName = name;
+				log.info("Player name now available: '{}' — re-syncing to record it", name);
+				syncCurrentAccountState();
+			}
+		}
+	}
+
+	@Subscribe
 	public void onAccountHashChanged(AccountHashChanged event)
 	{
 		currentAccountHash = client.getAccountHash();
+		// New account (or account cleared) — drop the cached name so onGameTick
+		// re-captures the correct character's name.
+		cachedPlayerName = null;
 		log.info("Account hash updated: {}", currentAccountHash);
 		
 		if (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated) {
@@ -233,7 +262,7 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
-		authService.sendBankData(currentAccountHash, buildItemPayload(bank.getItems()))
+		authService.sendBankData(currentAccountHash, getPlayerName(), buildItemPayload(bank.getItems()))
 			.thenAccept(success -> {
 				if (success) {
 					log.debug("Bank data synced successfully for account: {}", currentAccountHash);
@@ -253,7 +282,7 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
-		authService.sendInventoryData(currentAccountHash, buildItemPayload(inventory.getItems()))
+		authService.sendInventoryData(currentAccountHash, getPlayerName(), buildItemPayload(inventory.getItems()))
 			.thenAccept(success -> {
 				if (success) {
 					log.debug("Inventory data synced successfully for account: {}", currentAccountHash);
@@ -273,7 +302,7 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
-		authService.sendEquipmentData(currentAccountHash, buildItemPayload(equipment.getItems()))
+		authService.sendEquipmentData(currentAccountHash, getPlayerName(), buildItemPayload(equipment.getItems()))
 			.thenAccept(success -> {
 				if (success) {
 					log.debug("Equipment data synced successfully for account: {}", currentAccountHash);
@@ -308,6 +337,20 @@ public class OldSchoolDBPlugin extends Plugin
 		syncPrayerUnlockData();
 		syncTimeTrackingData();
 		syncSlayerTaskData();
+	}
+
+	// Current logged-in character's display name, sent with each sync so the
+	// backend can show characters by name instead of raw account hash. Reads the
+	// live name when available and caches it; returns the cache otherwise, since
+	// getLocalPlayer() is null right after login when the first syncs fire.
+	private String getPlayerName()
+	{
+		Player local = client.getLocalPlayer();
+		String name = local != null ? local.getName() : null;
+		if (name != null && !name.isEmpty()) {
+			cachedPlayerName = name;
+		}
+		return cachedPlayerName;
 	}
 
 	private List<Map<String, Object>> buildItemPayload(Item[] containerItems)

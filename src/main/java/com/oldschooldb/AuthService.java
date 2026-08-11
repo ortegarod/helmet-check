@@ -86,11 +86,12 @@ public class AuthService {
         });
     }
 
-    public CompletableFuture<Boolean> sendBankData(Long accountHash, List<Map<String, Object>> bankItems) {
+    public CompletableFuture<Boolean> sendBankData(Long accountHash, String playerName, List<Map<String, Object>> bankItems) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Map<String, Object> bankData = new HashMap<>();
                 bankData.put("account_hash", accountHash);
+                bankData.put("player_name", playerName);
                 bankData.put("timestamp", System.currentTimeMillis());
                 bankData.put("items", bankItems);
 
@@ -123,11 +124,12 @@ public class AuthService {
         });
     }
 
-    public CompletableFuture<Boolean> sendInventoryData(Long accountHash, List<Map<String, Object>> inventoryItems) {
+    public CompletableFuture<Boolean> sendInventoryData(Long accountHash, String playerName, List<Map<String, Object>> inventoryItems) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Map<String, Object> inventoryData = new HashMap<>();
                 inventoryData.put("account_hash", accountHash);
+                inventoryData.put("player_name", playerName);
                 inventoryData.put("timestamp", System.currentTimeMillis());
                 inventoryData.put("items", inventoryItems);
 
@@ -358,11 +360,12 @@ public class AuthService {
         });
     }
 
-    public CompletableFuture<Boolean> sendEquipmentData(Long accountHash, List<Map<String, Object>> equipmentItems) {
+    public CompletableFuture<Boolean> sendEquipmentData(Long accountHash, String playerName, List<Map<String, Object>> equipmentItems) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Map<String, Object> equipmentData = new HashMap<>();
                 equipmentData.put("account_hash", accountHash);
+                equipmentData.put("player_name", playerName);
                 equipmentData.put("timestamp", System.currentTimeMillis());
                 equipmentData.put("items", equipmentItems);
 
