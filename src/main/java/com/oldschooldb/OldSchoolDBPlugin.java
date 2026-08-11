@@ -69,6 +69,10 @@ public class OldSchoolDBPlugin extends Plugin
 	// which makes other plugins' onChatMessage handlers (e.g. LootTracker) NPE.
 	private boolean pendingGreeting = false;
 	private Long currentAccountHash = null;
+	// True once we've handled a login for the current session. LOGGED_IN fires again
+	// on every map-region load, so this lets us greet + full-resync only on the real
+	// login and ignore the region-load edges. Reset when we return to the login screen.
+	private boolean loggedInThisSession = false;
 	// Debounce state for skills/quests. StatChanged fires on every XP drop, so we
 	// coalesce those bursts into throttled syncs instead of one send (and, for
 	// quests, one full re-scan) per tick — the previous behaviour caused client lag.
@@ -88,9 +92,34 @@ public class OldSchoolDBPlugin extends Plugin
 
 	// Developers run RuneLite with -Doldschooldb.dev=true to point at the local
 	// backend. Regular users never see this and always hit prod.
+	private static boolean isDevMode()
+	{
+		return Boolean.getBoolean("oldschooldb.dev");
+	}
+
 	private static String resolveServerUrl()
 	{
-		return Boolean.getBoolean("oldschooldb.dev") ? DEV_SERVER_URL : PROD_SERVER_URL;
+		return isDevMode() ? DEV_SERVER_URL : PROD_SERVER_URL;
+	}
+
+	// In dev mode the local backend needs its own plugin key, separate from the
+	// prod key the user keeps in the config field. Pull the dev key from a VM
+	// property (-Doldschooldb.devToken=...) or the OLDSCHOOLDB_DEV_TOKEN env var so
+	// switching environments is just flipping the dev flag — no field swapping, and
+	// nothing dev-related ever ships in the user-facing config. Falls back to the
+	// config field if no dev key is supplied.
+	private String resolveApiToken()
+	{
+		if (isDevMode()) {
+			String devToken = System.getProperty("oldschooldb.devToken");
+			if (devToken == null || devToken.isEmpty()) {
+				devToken = System.getenv("OLDSCHOOLDB_DEV_TOKEN");
+			}
+			if (devToken != null && !devToken.isEmpty()) {
+				return devToken;
+			}
+		}
+		return config.apiToken();
 	}
 
 	@Override
@@ -126,9 +155,9 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 		
-		String apiToken = config.apiToken();
-		
-		if (apiToken.isEmpty()) {
+		String apiToken = resolveApiToken();
+
+		if (apiToken == null || apiToken.isEmpty()) {
 			log.info("Please configure your OldSchoolDB plugin key in the plugin settings");
 			log.info("Get your plugin key from: oldschooldb.com/plugin/setup");
 			return;
@@ -159,18 +188,31 @@ public class OldSchoolDBPlugin extends Plugin
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged gameStateChanged)
 	{
-		if (gameStateChanged.getGameState() == GameState.LOGGED_IN)
+		GameState state = gameStateChanged.getGameState();
+		if (state == GameState.LOGGED_IN)
 		{
-			// Defer the greeting/auth chat to onGameTick, once the player is loaded.
-			pendingGreeting = true;
+			// LOGGED_IN fires again on every map-region load, so only treat the first
+			// one of a session as a real login (greeting + full resync).
+			boolean freshLogin = !loggedInThisSession;
+			loggedInThisSession = true;
+
+			if (freshLogin) {
+				// Defer the greeting/auth chat to onGameTick, once the player is loaded.
+				pendingGreeting = true;
+			}
 
 			if (!isAuthenticated && authService != null) {
 				attemptAuthentication();
 			}
 
-			if (isAuthenticated && currentAccountHash != null && currentAccountHash != -1L) {
+			if (freshLogin && isAuthenticated && currentAccountHash != null && currentAccountHash != -1L) {
 				syncCurrentAccountState();
 			}
+		}
+		else if (state == GameState.LOGIN_SCREEN || state == GameState.CONNECTION_LOST)
+		{
+			// Back at the login screen (or dropped) — arm the greeting for next login.
+			loggedInThisSession = false;
 		}
 	}
 
@@ -190,6 +232,18 @@ public class OldSchoolDBPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
+		// Re-authenticate when the plugin key changes so a fresh key takes effect
+		// immediately without toggling the plugin or relogging. Handled before the
+		// auth guard below since it must run even while we're not yet authenticated.
+		if ("oldschooldb".equals(event.getGroup()) && "apiToken".equals(event.getKey())) {
+			isAuthenticated = false;
+			authenticationAttempted = false;
+			if (authService != null) {
+				attemptAuthentication();
+			}
+			return;
+		}
+
 		if (!isAuthenticated || currentAccountHash == null || currentAccountHash == -1L) {
 			return;
 		}
@@ -224,7 +278,7 @@ public class OldSchoolDBPlugin extends Plugin
 		// onChatMessage handlers that read getLocalPlayer() before it's ready.
 		if (pendingGreeting && client.getLocalPlayer() != null) {
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-				"OldSchoolDB: Sync ready! Open your bank to track items.", null);
+				"OldSchoolDB: Sync active — bank, inventory and gear sync automatically as they change.", null);
 			if (isAuthenticated && showAuthMessageOnLogin) {
 				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 					"OldSchoolDB: Connected and authenticated!", null);
@@ -282,6 +336,16 @@ public class OldSchoolDBPlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
+		int containerId = event.getContainerId();
+		String containerName =
+			containerId == InventoryID.BANK.getId() ? "BANK" :
+			containerId == InventoryID.INVENTORY.getId() ? "INVENTORY" :
+			containerId == InventoryID.EQUIPMENT.getId() ? "EQUIPMENT" : "other(" + containerId + ")";
+		boolean willSync = (currentAccountHash != null && currentAccountHash != -1L && isAuthenticated)
+			|| ((currentAccountHash == null || currentAccountHash == -1L) && client.getAccountHash() != -1L && isAuthenticated);
+		log.info("ItemContainerChanged: {} | authed={} accountHash={} -> {}",
+			containerName, isAuthenticated, currentAccountHash, willSync ? "SYNCING" : "SKIPPED (guard failed)");
+
 		// Handle bank, inventory, and equipment changes
 		if (event.getContainerId() == InventoryID.BANK.getId()) {
 			// Update current account hash when bank changes (in case it wasn't set yet)
@@ -324,8 +388,12 @@ public class OldSchoolDBPlugin extends Plugin
 			.thenAccept(success -> {
 				if (success) {
 					log.debug("Bank data synced ({} items) for account: {}", itemCount, currentAccountHash);
+					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"OldSchoolDB: Bank synced (" + itemCount + " items)", null));
 				} else {
 					log.warn("Failed to sync bank data for account: {}", currentAccountHash);
+					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"OldSchoolDB: Bank sync failed - check connection", null));
 				}
 			});
 	}
@@ -333,16 +401,22 @@ public class OldSchoolDBPlugin extends Plugin
 	private void syncCurrentInventoryData() {
 		ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
 		if (inventory == null) {
+			log.info("syncCurrentInventoryData: INVENTORY container is null — bailing, nothing sent");
 			return;
 		}
 
 		int itemCount = inventory.getItems().length;
+		log.info("syncCurrentInventoryData: sending {} items for account={} player={}", itemCount, currentAccountHash, getPlayerName());
 		authService.sendInventoryData(currentAccountHash, getPlayerName(), buildItemPayload(inventory.getItems()))
-			.thenAccept(success -> {
-				if (success) {
-					log.debug("Inventory data synced ({} items) for account: {}", itemCount, currentAccountHash);
+			.whenComplete((success, throwable) -> {
+				if (throwable != null) {
+					log.error("Inventory sync threw (swallowed before): {}", throwable.toString(), throwable);
+				} else if (Boolean.TRUE.equals(success)) {
+					log.info("Inventory data synced ({} items) for account: {}", itemCount, currentAccountHash);
+					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"OldSchoolDB: Inventory synced (" + itemCount + " items)", null));
 				} else {
-					log.warn("Failed to sync inventory data for account: {}", currentAccountHash);
+					log.warn("Failed to sync inventory data for account: {} (send returned false)", currentAccountHash);
 				}
 			});
 	}
@@ -353,10 +427,19 @@ public class OldSchoolDBPlugin extends Plugin
 			return;
 		}
 
+		int equippedCount = 0;
+		for (Item item : equipment.getItems()) {
+			if (item.getId() != -1) {
+				equippedCount++;
+			}
+		}
+		final int count = equippedCount;
 		authService.sendEquipmentData(currentAccountHash, getPlayerName(), buildItemPayload(equipment.getItems()))
 			.thenAccept(success -> {
 				if (success) {
-					log.debug("Equipment data synced for account: {}", currentAccountHash);
+					log.debug("Equipment data synced ({} items) for account: {}", count, currentAccountHash);
+					clientThread.invoke(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"OldSchoolDB: Equipment synced (" + count + " items)", null));
 				} else {
 					log.warn("Failed to sync equipment data for account: {}", currentAccountHash);
 				}

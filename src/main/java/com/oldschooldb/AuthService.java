@@ -92,7 +92,7 @@ public class AuthService {
                 bankData.put("items", bankItems);
 
                 String jsonBody = gson.toJson(bankData);
-                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+                RequestBody body = RequestBody.create(MediaType.get("application/json"), jsonBody);
 
                 Request request = new Request.Builder()
                     .url(serverUrl + "/api/plugin/bank/sync")
@@ -130,10 +130,13 @@ public class AuthService {
                 inventoryData.put("items", inventoryItems);
 
                 String jsonBody = gson.toJson(inventoryData);
-                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+                RequestBody body = RequestBody.create(MediaType.get("application/json"), jsonBody);
+
+                String url = serverUrl + "/api/plugin/inventory/sync";
+                log.info("POST inventory -> {} (items={})", url, inventoryItems.size());
 
                 Request request = new Request.Builder()
-                    .url(serverUrl + "/api/plugin/inventory/sync")
+                    .url(url)
                     .post(body)
                     .addHeader("Authorization", "Bearer " + apiToken)
                     .addHeader("User-Agent", "OldSchoolDB-Plugin/1.0")
@@ -142,17 +145,15 @@ public class AuthService {
 
                 try (Response response = client.newCall(request).execute()) {
                     if (response.isSuccessful()) {
-                        log.debug("Inventory data synced successfully for account: {}", accountHash);
+                        log.info("Inventory sync OK: {} <- {}", response.code(), url);
                         return true;
                     } else {
-                        log.error("Inventory sync failed with status: {}", response.code());
-                        if (response.body() != null) {
-                            log.error("Response: {}", response.body().string());
-                        }
+                        String respBody = response.body() != null ? response.body().string() : "(no body)";
+                        log.error("Inventory sync FAILED status={} url={} body={}", response.code(), url, respBody);
                     }
                 }
-            } catch (IOException e) {
-                log.error("Inventory sync request failed", e);
+            } catch (Throwable e) {
+                log.error("Inventory sync request threw: {}", e.toString(), e);
             }
             return false;
         });
@@ -176,7 +177,7 @@ public class AuthService {
                 payload.put("skills", skillList);
 
                 String jsonBody = gson.toJson(payload);
-                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+                RequestBody body = RequestBody.create(MediaType.get("application/json"), jsonBody);
 
                 Request request = new Request.Builder()
                     .url(serverUrl + "/api/plugin/skills/sync")
@@ -213,7 +214,7 @@ public class AuthService {
                 payload.put("quests", questList);
 
                 String jsonBody = gson.toJson(payload);
-                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+                RequestBody body = RequestBody.create(MediaType.get("application/json"), jsonBody);
 
                 Request request = new Request.Builder()
                     .url(serverUrl + "/api/plugin/quests/sync")
@@ -242,7 +243,7 @@ public class AuthService {
                 payload.put("unlocks", unlocks);
 
                 String jsonBody = gson.toJson(payload);
-                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+                RequestBody body = RequestBody.create(MediaType.get("application/json"), jsonBody);
 
                 Request request = new Request.Builder()
                     .url(serverUrl + "/api/plugin/prayer-unlocks/sync")
@@ -288,7 +289,7 @@ public class AuthService {
                 payload.put("entries", entries);
 
                 String jsonBody = gson.toJson(payload);
-                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+                RequestBody body = RequestBody.create(MediaType.get("application/json"), jsonBody);
 
                 Request request = new Request.Builder()
                     .url(serverUrl + "/api/plugin/timetracking/sync")
@@ -328,7 +329,7 @@ public class AuthService {
                 payload.put("remaining_amount", remainingAmount);
 
                 String jsonBody = gson.toJson(payload);
-                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+                RequestBody body = RequestBody.create(MediaType.get("application/json"), jsonBody);
 
                 Request request = new Request.Builder()
                     .url(serverUrl + "/api/plugin/slayer-task/sync")
@@ -366,7 +367,7 @@ public class AuthService {
                 equipmentData.put("items", equipmentItems);
 
                 String jsonBody = gson.toJson(equipmentData);
-                RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json"));
+                RequestBody body = RequestBody.create(MediaType.get("application/json"), jsonBody);
 
                 Request request = new Request.Builder()
                     .url(serverUrl + "/api/plugin/equipment/sync")
