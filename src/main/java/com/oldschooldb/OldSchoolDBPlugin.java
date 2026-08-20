@@ -104,17 +104,14 @@ public class OldSchoolDBPlugin extends Plugin
 
 	// In dev mode the local backend needs its own plugin key, separate from the
 	// prod key the user keeps in the config field. Pull the dev key from a VM
-	// property (-Doldschooldb.devToken=...) or the OLDSCHOOLDB_DEV_TOKEN env var so
-	// switching environments is just flipping the dev flag — no field swapping, and
-	// nothing dev-related ever ships in the user-facing config. Falls back to the
-	// config field if no dev key is supplied.
+	// property (-Doldschooldb.devToken=...) so switching environments is just
+	// flipping the dev flag — no field swapping, and nothing dev-related ever
+	// ships in the user-facing config. Falls back to the config field if no
+	// dev key is supplied.
 	private String resolveApiToken()
 	{
 		if (isDevMode()) {
 			String devToken = System.getProperty("oldschooldb.devToken");
-			if (devToken == null || devToken.isEmpty()) {
-				devToken = System.getenv("OLDSCHOOLDB_DEV_TOKEN");
-			}
 			if (devToken != null && !devToken.isEmpty()) {
 				return devToken;
 			}
